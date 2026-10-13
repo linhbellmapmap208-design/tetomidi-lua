@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MIDI → Lua · Roblox</title>
+  <link rel="icon" href="logo.png">
+  <style>
+    :root {
+      --bg: #0b0b0d;
+      --panel: #141418;
+      --line: #26262e;
+      --text: #e8e8ee;
+      --muted: #8a8a96;
+      --accent: #ffffff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+    }
+    .wrap {
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 40px 20px 60px;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+    h1 {
+      font-size: 20px;
+      font-weight: 600;
+      margin: 0 0 4px;
+    }
+    .sub {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    header img {
+      width: 72px;
+      height: 72px;
+      flex-shrink: 0;
+      border-radius: 14px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+    label.field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--muted);
+      flex: 1 1 200px;
+    }
+    input[type="file"] {
+      color: var(--muted);
+      font-size: 14px;
+    }
+    select, input[type="number"] {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px 10px;
+      font-size: 14px;
+      width: 100%;
+    }
+    select:focus, input[type="number"]:focus {
+      outline: none;
+      border-color: #44444f;
+    }
+    button {
+      background: var(--accent);
+      color: #000;
+      border: none;
+      border-radius: 8px;
+      padding: 9px 16px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.ghost {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--line);
+    }
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    textarea {
+      width: 100%;
+      height: 340px;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 14px;
+      font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      resize: vertical;
+    }
+    .status {
+      color: var(--muted);
+      font-size: 13px;
+      min-height: 18px;
+      margin-top: 10px;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    footer {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 32px;
+      text-align: center;
+    }
+    @media (max-width: 520px) {
+      header img { width: 56px; height: 56px; }
+      h1 { font-size: 17px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>MIDI → Lua cho Roblox</h1>
+        <p class="sub">Chuyển file .mid thành bảng nốt nhạc để dùng trong ModuleScript</p>
+      </div>
+      <img src="logo.png" alt="Logo">
+    </header>
+
+    <div class="card">
+      <div class="row">
+        <label class="field">
+          File MIDI
+          <input type="file" id="file" accept=".mid,.midi">
+        </label>
+        <label class="field">
+          Track
+          <select id="track" disabled>
+            <option>Chưa chọn file</option>
+          </select>
+        </label>
+        <label class="field">
+          Bỏ nốt ngắn hơn (ms)
+          <input type="number" id="minDur" value="0" min="0" step="10">
+        </label>
+      </div>
+    </div>
+
+    <div class="card">
+      <textarea id="output" readonly placeholder="Kết quả Lua sẽ hiện ở đây..."></textarea>
+      <div class="actions">
+        <button id="copy" disabled>Sao chép</button>
+        <button id="download" class="ghost" disabled>Tải .lua</button>
+      </div>
+      <div class="status" id="status"></div>
+    </div>
+
+    <footer>Mọi xử lý diễn ra trên trình duyệt, file của bạn không được tải lên server.</footer>
+  </div>
+
+  <script type="module">
+    import { Midi } from "https://cdn.jsdelivr.net/npm/@tonejs/midi@2.0.28/+esm";
+
+    const $ = (id) => document.getElementById(id);
+    const fileInput = $("file");
+    const trackSel = $("track");
+    const minDur = $("minDur");
+    const output = $("output");
+    const copyBtn = $("copy");
+    const downloadBtn = $("download");
+    const statusEl = $("status");
+
+    let midi = null;
+    let baseName = "song";
+    let lastLua = "";
+
+    function setStatus(msg) {
+      statusEl.textContent = msg;
+    }
+
+    function clearOutput() {
+      lastLua = "";
+      output.value = "";
+      copyBtn.disabled = true;
+      downloadBtn.disabled = true;
+    }
+
+    fileInput.addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      clearOutput();
+      if (!file) return;
+
+      try {
+        midi = new Midi(await file.arrayBuffer());
+      } catch (err) {
+        midi = null;
+        trackSel.disabled = true;
+        setStatus("Không đọc được file MIDI. Hãy kiểm tra lại file.");
+        return;
+      }
+
+      baseName = file.name.replace(/\.(mid|midi)$/i, "");
+
+      trackSel.innerHTML = "";
+      const allOpt = document.createElement("option");
+      allOpt.value = "all";
+      allOpt.textContent = "Tất cả track";
+      trackSel.appendChild(allOpt);
+
+      midi.tracks.forEach((t, i) => {
+        const opt = document.createElement("option");
+        opt.value = String(i);
+        const name = t.name || `Track ${i + 1}`;
+        opt.textContent = `${name} (${t.notes.length} nốt)`;
+        trackSel.appendChild(opt);
+      });
+
+      trackSel.disabled = false;
+      convert();
+    });
+
+    trackSel.addEventListener("change", convert);
+    minDur.addEventListener("input", convert);
+
+    function convert() {
+      if (!midi) return;
+
+      const choice = trackSel.value;
+      const minMs = Math.max(0, Number(minDur.value) || 0);
+
+      let notes = [];
+      midi.tracks.forEach((t, i) => {
+        if (choice !== "all" && Number(choice) !== i) return;
+        t.notes.forEach((n) => {
+          notes.push({ time: n.time, note: n.midi, duration: n.duration });
+        });
+      });
+
+      notes = notes
+        .filter((n) => n.duration * 1000 >= minMs)
+        .sort((a, b) => a.time - b.time || a.note - b.note);
+
+      if (notes.length === 0) {
+        clearOutput();
+        setStatus("Không có nốt nào sau khi lọc.");
+        return;
+      }
+
+      const lines = notes.map(
+        (n) =>
+          `\t{time = ${n.time.toFixed(3)}, note = ${n.note}, duration = ${n.duration.toFixed(3)}},`
+      );
+      lastLua = `local SONG = {\n${lines.join("\n")}\n}\n\nreturn SONG\n`;
+      output.value = lastLua;
+      copyBtn.disabled = false;
+      downloadBtn.disabled = false;
+      setStatus(`Đã chuyển ${notes.length} nốt.`);
+    }
+
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(lastLua);
+      } catch {
+        output.select();
+        document.execCommand("copy");
+      }
+      setStatus("Đã sao chép vào clipboard.");
+    });
+
+    downloadBtn.addEventListener("click", () => {
+      const blob = new Blob([lastLua], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${baseName}.lua`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  </script>
+</body>
+</html>
